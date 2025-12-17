@@ -1,0 +1,86 @@
+{
+ "actions": [],
+ "creation": "2024-01-01 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "translator_info_section",
+  "translator_name",
+  "translator_email",
+  "column_break_1",
+  "translation_team_email",
+  "language_team_name",
+  "reference_languages_section",
+  "reference_languages"
+ ],
+ "fields": [
+  {
+   "fieldname": "translator_info_section",
+   "fieldtype": "Section Break",
+   "label": "Translator Information"
+  },
+  {
+   "fieldname": "translator_name",
+   "fieldtype": "Data",
+   "label": "Translator Name",
+   "description": "Name to use in Last-Translator field of PO files"
+  },
+  {
+   "fieldname": "translator_email",
+   "fieldtype": "Data",
+   "label": "Translator Email",
+   "description": "Email to use in Last-Translator field of PO files"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "translation_team_email",
+   "fieldtype": "Data",
+   "label": "Translation Team Email",
+   "description": "Email to use in Language-Team field of PO files"
+  },
+  {
+   "fieldname": "language_team_name",
+   "fieldtype": "Data",
+   "label": "Language Team Name",
+   "description": "Optional team name to use in Language-Team field"
+  },
+  {
+   "fieldname": "reference_languages_section",
+   "fieldtype": "Section Break",
+   "label": "Reference Languages"
+  },
+  {
+   "fieldname": "reference_languages",
+   "fieldtype": "Table",
+   "label": "Reference Languages",
+   "options": "Translation Reference Language",
+   "description": "Languages to show as translation hints when editing translations"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "issingle": 1,
+ "links": [],
+ "modified": "2024-01-01 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Translation Manager",
+ "name": "Translation Manager Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}

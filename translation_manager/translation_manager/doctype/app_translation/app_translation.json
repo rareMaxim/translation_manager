@@ -1,0 +1,140 @@
+{
+ "actions": [],
+ "creation": "2024-01-01 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "app_name",
+  "app_title",
+  "language",
+  "language_name",
+  "column_break_1",
+  "total_strings",
+  "translated_strings",
+  "progress",
+  "metadata_section",
+  "project_version",
+  "report_bugs_to",
+  "column_break_2",
+  "copyright_holder",
+  "license_info"
+ ],
+ "fields": [
+  {
+   "fieldname": "app_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "App Name",
+   "reqd": 1
+  },
+  {
+   "fieldname": "app_title",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "App Title",
+   "read_only": 1
+  },
+  {
+   "fieldname": "language",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Language",
+   "options": "Language",
+   "reqd": 1
+  },
+  {
+   "fieldname": "language_name",
+   "fieldtype": "Data",
+   "label": "Language Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "total_strings",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Total Strings",
+   "read_only": 1
+  },
+  {
+   "fieldname": "translated_strings",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Translated Strings",
+   "read_only": 1
+  },
+  {
+   "fieldname": "progress",
+   "fieldtype": "Percent",
+   "in_list_view": 1,
+   "label": "Progress",
+   "read_only": 1
+  },
+  {
+   "fieldname": "metadata_section",
+   "fieldtype": "Section Break",
+   "label": "Translation Metadata",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "project_version",
+   "fieldtype": "Data",
+   "label": "Project Version",
+   "description": "Version to use in Project-Id-Version field (e.g., 'Frappe Framework 15.0')"
+  },
+  {
+   "fieldname": "report_bugs_to",
+   "fieldtype": "Data",
+   "label": "Report Bugs To",
+   "description": "Email address for reporting translation bugs (Report-Msgid-Bugs-To field)"
+  },
+  {
+   "fieldname": "column_break_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "copyright_holder",
+   "fieldtype": "Data",
+   "label": "Copyright Holder",
+   "description": "Copyright holder name (e.g., 'Frappe Technologies')"
+  },
+  {
+   "fieldname": "license_info",
+   "fieldtype": "Small Text",
+   "label": "License Information",
+   "description": "License text for the translation"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "is_virtual": 1,
+ "links": [],
+ "modified": "2024-01-01 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Translation Manager",
+ "name": "App Translation",
+ "naming_rule": "Expression",
+ "autoname": "format:{app_name}-{language}",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}
