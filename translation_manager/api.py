@@ -411,7 +411,8 @@ def compile_mo(app, language):
         mofile.write_mo(f, catalog)
 
     # Also copy to assets directory where Frappe looks for translations
-    bench_path = Path(frappe.get_app_path("frappe")).parent.parent
+    # frappe.get_app_path("frappe") returns /bench/apps/frappe/frappe, so .parent.parent.parent gives /bench
+    bench_path = Path(frappe.get_app_path("frappe")).parent.parent.parent
     assets_mo_dir = bench_path / "sites" / "assets" / "locale" / language.replace("-", "_") / "LC_MESSAGES"
     assets_mo_path = assets_mo_dir / f"{app}.mo"
 
@@ -420,6 +421,12 @@ def compile_mo(app, language):
 
     # Copy MO file to assets
     shutil.copy2(mo_path, assets_mo_path)
+
+    # Clear all translation caches to ensure changes take effect
+    frappe.cache.delete_value(["bootinfo", "lang_user_translations", "merged_translations"])
+    # Clear the specific language cache key
+    frappe.cache.hdel("merged_translations", language)
+    frappe.cache.hdel("merged_translations", language.replace("-", "_"))
 
     return {"success": True, "path": str(mo_path), "assets_path": str(assets_mo_path)}
 
