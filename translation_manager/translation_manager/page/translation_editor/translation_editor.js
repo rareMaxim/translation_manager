@@ -15,6 +15,23 @@ class TranslationEditor {
 		this.modified = {};
 		this.reference_languages = [];
 		this.reference_translations = {};
+		this.plural_forms = null;
+		this.num_plurals = 2;
+
+		// Plural form labels for common languages
+		this.plural_labels = {
+			// Slavic languages (3 forms)
+			"uk": ["Однина (1, 21, 31...)", "Декілька (2-4, 22-24...)", "Багато (0, 5-20, 25-30...)"],
+			"ru": ["Единственное (1, 21, 31...)", "Несколько (2-4, 22-24...)", "Много (0, 5-20, 25-30...)"],
+			"pl": ["Jeden (1)", "Kilka (2-4, 22-24...)", "Wiele (0, 5-21, 25-31...)"],
+			// Germanic/Romance (2 forms)
+			"en": ["Singular (1)", "Plural (0, 2, 3...)"],
+			"de": ["Singular (1)", "Plural (0, 2, 3...)"],
+			"fr": ["Singulier (0, 1)", "Pluriel (2, 3...)"],
+			"es": ["Singular (1)", "Plural (0, 2, 3...)"],
+			// Default
+			"default": ["Form 0", "Form 1", "Form 2", "Form 3", "Form 4", "Form 5"]
+		};
 
 		this.setup_page();
 		this.load_apps();
@@ -135,6 +152,8 @@ class TranslationEditor {
 			return;
 		}
 
+		this.current_language = language;
+
 		frappe.call({
 			method: "translation_manager.api.get_po_entries",
 			args: { app: app, language: language },
@@ -142,7 +161,10 @@ class TranslationEditor {
 			freeze_message: __("Loading translations..."),
 			callback: (r) => {
 				if (r.message) {
-					this.entries = r.message;
+					// New response format with plural info
+					this.entries = r.message.entries || r.message;
+					this.plural_forms = r.message.plural_forms || null;
+					this.num_plurals = r.message.num_plurals || 2;
 					this.modified = {};
 					this.current_page = 0;
 					this.update_stats();
@@ -154,9 +176,29 @@ class TranslationEditor {
 
 	update_stats() {
 		const total = this.entries.length;
-		const translated = this.entries.filter(e => e.msgstr).length;
+		// For plural entries, check if all forms are translated
+		const translated = this.entries.filter(e => {
+			if (e.is_plural && Array.isArray(e.msgstr)) {
+				return e.msgstr.every(s => s && s.trim());
+			}
+			return e.msgstr && (typeof e.msgstr === 'string' ? e.msgstr.trim() : true);
+		}).length;
 		const fuzzy = this.entries.filter(e => e.fuzzy).length;
+		const plurals = this.entries.filter(e => e.is_plural).length;
 		const progress = total ? Math.round(translated / total * 100) : 0;
+
+		// Plural forms info
+		let pluralInfo = "";
+		if (this.plural_forms) {
+			pluralInfo = `
+				<div class="plural-forms-info mt-3 p-2 bg-light rounded">
+					<small class="text-muted">
+						<strong>${__("Plural Forms")}:</strong> ${this.num_plurals} ${__("forms")}
+						${plurals > 0 ? `| <strong>${plurals}</strong> ${__("plural entries")}` : ""}
+					</small>
+				</div>
+			`;
+		}
 
 		this.container.find(".translation-stats").html(`
 			<div class="row">
@@ -188,7 +230,16 @@ class TranslationEditor {
 			<div class="progress mt-3" style="height: 10px;">
 				<div class="progress-bar bg-success" style="width: ${progress}%"></div>
 			</div>
+			${pluralInfo}
 		`);
+	}
+
+	// Helper to get msgstr as string for search (handles both singular and plural)
+	get_msgstr_string(entry) {
+		if (entry.is_plural && Array.isArray(entry.msgstr)) {
+			return entry.msgstr.join(" ");
+		}
+		return entry.msgstr || "";
 	}
 
 	filter_entries() {
@@ -199,16 +250,17 @@ class TranslationEditor {
 		if (search) {
 			filtered = filtered.filter(e => {
 				const msgid_lower = e.msgid.toLowerCase();
-				const msgstr_lower = (e.msgstr || "").toLowerCase();
-				return msgid_lower.includes(search) || msgstr_lower.includes(search);
+				const msgid_plural_lower = (e.msgid_plural || "").toLowerCase();
+				const msgstr_lower = this.get_msgstr_string(e).toLowerCase();
+				return msgid_lower.includes(search) || msgid_plural_lower.includes(search) || msgstr_lower.includes(search);
 			});
 
 			// Sort by relevance: exact matches first, then starts with, then contains
 			filtered.sort((a, b) => {
 				const a_msgid = a.msgid.toLowerCase();
 				const b_msgid = b.msgid.toLowerCase();
-				const a_msgstr = (a.msgstr || "").toLowerCase();
-				const b_msgstr = (b.msgstr || "").toLowerCase();
+				const a_msgstr = this.get_msgstr_string(a).toLowerCase();
+				const b_msgstr = this.get_msgstr_string(b).toLowerCase();
 
 				// Score calculation:
 				// 4 = exact match
@@ -238,7 +290,7 @@ class TranslationEditor {
 
 		// Apply mode filter
 		if (this.filter_mode === "untranslated") {
-			filtered = filtered.filter(e => !e.msgstr);
+			filtered = filtered.filter(e => !this.is_entry_translated(e));
 		} else if (this.filter_mode === "fuzzy") {
 			filtered = filtered.filter(e => e.fuzzy);
 		}
@@ -246,6 +298,19 @@ class TranslationEditor {
 		this.filtered_entries = filtered;
 		this.current_page = 0;
 		this.render_entries();
+	}
+
+	get_plural_label(index) {
+		const lang = this.current_language || "default";
+		const labels = this.plural_labels[lang] || this.plural_labels["default"];
+		return labels[index] || `Form ${index}`;
+	}
+
+	is_entry_translated(entry) {
+		if (entry.is_plural && Array.isArray(entry.msgstr)) {
+			return entry.msgstr.every(s => s && s.trim());
+		}
+		return entry.msgstr && (typeof entry.msgstr === 'string' ? entry.msgstr.trim() : true);
 	}
 
 	render_entries() {
@@ -264,7 +329,8 @@ class TranslationEditor {
 		let html = '<div class="translation-entries">';
 		for (const entry of page_entries) {
 			const modified_class = this.modified[entry.msgid] ? "modified" : "";
-			const status_class = !entry.msgstr ? "untranslated" : (entry.fuzzy ? "fuzzy" : "translated");
+			const is_translated = this.is_entry_translated(entry);
+			const status_class = !is_translated ? "untranslated" : (entry.fuzzy ? "fuzzy" : "translated");
 
 			// Build locations display
 			let locations_html = "";
@@ -292,8 +358,79 @@ class TranslationEditor {
 				</div>`;
 			}
 
-			html += `
-				<div class="translation-entry ${modified_class} ${status_class}" data-msgid="${frappe.utils.escape_html(entry.msgid)}">
+			// Build translation inputs - different for plural vs singular
+			let translation_inputs_html = "";
+			if (entry.is_plural) {
+				// Plural entry - show multiple inputs
+				const msgstr_array = Array.isArray(entry.msgstr) ? entry.msgstr : [];
+				translation_inputs_html = `
+					<div class="plural-badge mb-2">
+						<span class="badge badge-info">${__("Plural")}</span>
+					</div>
+					<div class="plural-source mb-2">
+						<div class="small text-muted">${__("Singular")}:</div>
+						<div class="entry-source-quote">
+							<div class="entry-text">${frappe.utils.escape_html(entry.msgid)}</div>
+						</div>
+						<div class="small text-muted mt-1">${__("Plural")}:</div>
+						<div class="entry-source-quote">
+							<div class="entry-text">${frappe.utils.escape_html(entry.msgid_plural || "")}</div>
+						</div>
+					</div>
+					<div class="plural-forms">
+				`;
+				for (let i = 0; i < this.num_plurals; i++) {
+					const value = msgstr_array[i] || "";
+					translation_inputs_html += `
+						<div class="plural-form-group mb-2">
+							<label class="small text-muted">${this.get_plural_label(i)}</label>
+							<textarea class="form-control translation-input plural-input"
+								rows="1"
+								data-plural-index="${i}">${frappe.utils.escape_html(value)}</textarea>
+						</div>
+					`;
+				}
+				translation_inputs_html += `</div>`;
+			} else {
+				// Regular singular entry
+				translation_inputs_html = `
+					<textarea class="form-control translation-input" rows="2">${frappe.utils.escape_html(entry.msgstr || "")}</textarea>
+				`;
+			}
+
+			// For plural entries, we need different source display
+			let source_html = "";
+			if (entry.is_plural) {
+				source_html = `
+					<div class="entry-source">
+						<div class="entry-label">${__("Source")} <span class="badge badge-info">${__("Plural")}</span></div>
+						<div class="plural-source-display">
+							<div class="mb-1">
+								<small class="text-muted">${__("Singular")}:</small>
+								<div class="entry-source-quote">
+									<div class="entry-text">${frappe.utils.escape_html(entry.msgid)}</div>
+									<button class="btn btn-xs btn-default copy-source-btn" data-text="${frappe.utils.escape_html(entry.msgid)}" title="${__("Copy to clipboard")}">
+										<svg class="icon icon-sm"><use href="#icon-copy"></use></svg>
+									</button>
+								</div>
+							</div>
+							<div>
+								<small class="text-muted">${__("Plural")}:</small>
+								<div class="entry-source-quote">
+									<div class="entry-text">${frappe.utils.escape_html(entry.msgid_plural || "")}</div>
+									<button class="btn btn-xs btn-default copy-source-btn" data-text="${frappe.utils.escape_html(entry.msgid_plural || "")}" title="${__("Copy to clipboard")}">
+										<svg class="icon icon-sm"><use href="#icon-copy"></use></svg>
+									</button>
+								</div>
+							</div>
+						</div>
+						${locations_html}
+						${context_html}
+						${comments_html}
+					</div>
+				`;
+			} else {
+				source_html = `
 					<div class="entry-source">
 						<div class="entry-label">${__("Source")}</div>
 						<div class="entry-source-quote">
@@ -305,10 +442,24 @@ class TranslationEditor {
 						${locations_html}
 						${context_html}
 						${comments_html}
+						<button class="btn btn-xs btn-info convert-to-plural-btn mt-2"
+							data-msgid="${frappe.utils.escape_html(entry.msgid)}"
+							data-msgstr="${frappe.utils.escape_html(entry.msgstr || "")}">
+							<i class="fa fa-language"></i> ${__("Convert to Plural")}
+						</button>
 					</div>
+				`;
+			}
+
+			html += `
+				<div class="translation-entry ${modified_class} ${status_class}"
+					data-msgid="${frappe.utils.escape_html(entry.msgid)}"
+					data-msgid-plural="${frappe.utils.escape_html(entry.msgid_plural || "")}"
+					data-is-plural="${entry.is_plural ? "1" : "0"}">
+					${source_html}
 					<div class="entry-translation">
 						<div class="entry-label">${__("Translation")}</div>
-						<textarea class="form-control translation-input" rows="2">${frappe.utils.escape_html(entry.msgstr || "")}</textarea>
+						${entry.is_plural ? this.render_plural_inputs(entry) : `<textarea class="form-control translation-input" rows="2">${frappe.utils.escape_html(entry.msgstr || "")}</textarea>`}
 						<label class="fuzzy-checkbox mt-2">
 							<input type="checkbox" class="fuzzy-input" ${entry.fuzzy ? "checked" : ""}>
 							${__("Fuzzy (needs review)")}
@@ -321,24 +472,51 @@ class TranslationEditor {
 
 		this.container.find(".translation-list").html(html);
 
-		// Bind events
-		this.container.find(".translation-input").on("input", (e) => {
+		// Bind events for singular entries
+		this.container.find(".translation-entry[data-is-plural='0'] .translation-input").on("input", (e) => {
 			const $entry = $(e.target).closest(".translation-entry");
 			const msgid = $entry.data("msgid");
 			const msgstr = e.target.value;
 			const fuzzy = $entry.find(".fuzzy-input").prop("checked");
 
-			this.modified[msgid] = { msgstr, fuzzy };
+			this.modified[msgid] = { msgstr, fuzzy, is_plural: false };
+			$entry.addClass("modified");
+		});
+
+		// Bind events for plural entries
+		this.container.find(".translation-entry[data-is-plural='1'] .plural-input").on("input", (e) => {
+			const $entry = $(e.target).closest(".translation-entry");
+			const msgid = $entry.data("msgid");
+			const msgid_plural = $entry.data("msgid-plural");
+			const fuzzy = $entry.find(".fuzzy-input").prop("checked");
+
+			// Collect all plural form values
+			const msgstr = [];
+			$entry.find(".plural-input").each((_i, el) => {
+				msgstr.push($(el).val());
+			});
+
+			this.modified[msgid] = { msgstr, fuzzy, is_plural: true, msgid_plural };
 			$entry.addClass("modified");
 		});
 
 		this.container.find(".fuzzy-input").on("change", (e) => {
 			const $entry = $(e.target).closest(".translation-entry");
 			const msgid = $entry.data("msgid");
-			const msgstr = $entry.find(".translation-input").val();
+			const is_plural = $entry.data("is-plural") === "1";
 			const fuzzy = e.target.checked;
 
-			this.modified[msgid] = { msgstr, fuzzy };
+			if (is_plural) {
+				const msgid_plural = $entry.data("msgid-plural");
+				const msgstr = [];
+				$entry.find(".plural-input").each((_i, el) => {
+					msgstr.push($(el).val());
+				});
+				this.modified[msgid] = { msgstr, fuzzy, is_plural: true, msgid_plural };
+			} else {
+				const msgstr = $entry.find(".translation-input").val();
+				this.modified[msgid] = { msgstr, fuzzy, is_plural: false };
+			}
 			$entry.addClass("modified");
 		});
 
@@ -368,11 +546,141 @@ class TranslationEditor {
 			});
 		});
 
+		// Bind convert to plural button
+		this.container.find(".convert-to-plural-btn").on("click", (e) => {
+			e.preventDefault();
+			const msgid = $(e.currentTarget).data("msgid");
+			const msgstr = $(e.currentTarget).data("msgstr");
+			this.show_convert_to_plural_dialog(msgid, msgstr);
+		});
+
 		// Render pagination
 		this.render_pagination();
 
 		// Load reference translations for current page
 		this.load_reference_translations();
+	}
+
+	show_convert_to_plural_dialog(msgid, existing_translation) {
+		const app = this.get_app();
+		const language = this.language_field.get_value();
+
+		// Try to guess singular/plural forms from msgid
+		// Common patterns: "{0} rows", "{0} items", etc.
+		let suggested_singular = msgid.replace(/\{0\}\s*(\w+)s\b/i, "{0} $1");
+		let suggested_plural = msgid;
+
+		// If no change was made, try other patterns
+		if (suggested_singular === msgid) {
+			suggested_singular = msgid.replace(/(\d+)\s*(\w+)s\b/i, "1 $2");
+			if (suggested_singular === msgid) {
+				suggested_singular = msgid;
+			}
+		}
+
+		// Build plural form fields dynamically
+		const plural_fields = [];
+		for (let i = 0; i < this.num_plurals; i++) {
+			plural_fields.push({
+				label: this.get_plural_label(i),
+				fieldname: `msgstr_${i}`,
+				fieldtype: "Data",
+				default: i === this.num_plurals - 1 ? existing_translation : "",
+				reqd: 1
+			});
+		}
+
+		const dialog = new frappe.ui.Dialog({
+			title: __("Convert to Plural Form"),
+			fields: [
+				{
+					fieldtype: "HTML",
+					options: `<div class="alert alert-info">
+						<strong>${__("Original")}:</strong> ${frappe.utils.escape_html(msgid)}<br>
+						<small class="text-muted">${__("This will replace the singular entry with a plural form that supports {0} forms for this language.", [this.num_plurals])}</small>
+					</div>`
+				},
+				{
+					fieldtype: "Section Break",
+					label: __("Source (English)")
+				},
+				{
+					label: __("Singular Form") + " (e.g., '1 row', '{0} row')",
+					fieldname: "msgid_singular",
+					fieldtype: "Data",
+					default: suggested_singular,
+					reqd: 1,
+					description: __("The form used when count = 1")
+				},
+				{
+					label: __("Plural Form") + " (e.g., '{0} rows')",
+					fieldname: "msgid_plural",
+					fieldtype: "Data",
+					default: suggested_plural,
+					reqd: 1,
+					description: __("The form used for other counts")
+				},
+				{
+					fieldtype: "Section Break",
+					label: __("Translations")
+				},
+				...plural_fields
+			],
+			size: "large",
+			primary_action_label: __("Convert"),
+			primary_action: (values) => {
+				// Collect msgstr forms
+				const msgstr_forms = [];
+				for (let i = 0; i < this.num_plurals; i++) {
+					msgstr_forms.push(values[`msgstr_${i}`] || "");
+				}
+
+				frappe.call({
+					method: "translation_manager.api.convert_to_plural",
+					args: {
+						app,
+						language,
+						msgid,
+						msgid_singular: values.msgid_singular,
+						msgid_plural: values.msgid_plural,
+						msgstr_forms
+					},
+					freeze: true,
+					freeze_message: __("Converting to plural..."),
+					callback: (r) => {
+						if (r.message && r.message.success) {
+							frappe.show_alert({
+								message: __("Converted to plural form successfully"),
+								indicator: "green"
+							});
+							dialog.hide();
+							// Reload translations to see the change
+							this.load_translations();
+						}
+					}
+				});
+			}
+		});
+
+		dialog.show();
+	}
+
+	render_plural_inputs(entry) {
+		const msgstr_array = Array.isArray(entry.msgstr) ? entry.msgstr : [];
+		let html = '<div class="plural-forms">';
+		for (let i = 0; i < this.num_plurals; i++) {
+			const value = msgstr_array[i] || "";
+			html += `
+				<div class="plural-form-group mb-2">
+					<label class="small text-muted">${this.get_plural_label(i)}</label>
+					<textarea class="form-control plural-input"
+						rows="1"
+						data-plural-index="${i}">${frappe.utils.escape_html(value)}</textarea>
+				</div>
+			`;
+		}
+		html += '</div>';
+		return html;
 	}
 
 	render_pagination() {
@@ -433,7 +741,9 @@ class TranslationEditor {
 		const translations = Object.entries(this.modified).map(([msgid, data]) => ({
 			msgid,
 			msgstr: data.msgstr,
-			fuzzy: data.fuzzy
+			fuzzy: data.fuzzy,
+			is_plural: data.is_plural || false,
+			msgid_plural: data.msgid_plural || null
 		}));
 
 		if (!translations.length) {

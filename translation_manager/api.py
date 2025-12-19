@@ -162,7 +162,7 @@ def get_translation_stats(app, language):
 
 @frappe.whitelist()
 def get_po_entries(app, language):
-    """Get all PO entries for an app and language"""
+    """Get all PO entries for an app and language, including plural forms"""
     from babel.messages import pofile
     from pathlib import Path
 
@@ -175,21 +175,58 @@ def get_po_entries(app, language):
     with open(po_path, "rb") as f:
         catalog = pofile.read_po(f, locale=language)
 
+    # Get plural forms info from catalog
+    plural_forms = None
+    num_plurals = 2  # Default
+    if catalog.num_plurals:
+        num_plurals = catalog.num_plurals
+    if catalog.plural_expr:
+        plural_forms = f"nplurals={num_plurals}; plural={catalog.plural_expr};"
+
     entries = []
     for message in catalog:
         if message.id:  # Skip header
-            entries.append({
-                "msgid": message.id,
-                "msgstr": message.string or "",
-                "fuzzy": "fuzzy" in message.flags,
-                "locations": [f"{loc[0]}:{loc[1]}" for loc in (message.locations or [])],
-                "context": message.context or "",
-                "comments": "\n".join(message.user_comments) if message.user_comments else "",
-                "auto_comments": "\n".join(message.auto_comments) if message.auto_comments else "",
-                "flags": list(message.flags) if message.flags else []
-            })
+            # Check if this is a plural message
+            is_plural = message.pluralizable
 
-    return entries
+            if is_plural:
+                # For plural messages, message.id is singular, message.string is tuple
+                msgstr_list = list(message.string) if isinstance(message.string, tuple) else [message.string or ""] * num_plurals
+                # Ensure we have the right number of plural forms
+                while len(msgstr_list) < num_plurals:
+                    msgstr_list.append("")
+
+                entries.append({
+                    "msgid": message.id[0] if isinstance(message.id, tuple) else message.id,
+                    "msgid_plural": message.id[1] if isinstance(message.id, tuple) else None,
+                    "msgstr": msgstr_list,
+                    "is_plural": True,
+                    "fuzzy": "fuzzy" in message.flags,
+                    "locations": [f"{loc[0]}:{loc[1]}" for loc in (message.locations or [])],
+                    "context": message.context or "",
+                    "comments": "\n".join(message.user_comments) if message.user_comments else "",
+                    "auto_comments": "\n".join(message.auto_comments) if message.auto_comments else "",
+                    "flags": list(message.flags) if message.flags else []
+                })
+            else:
+                entries.append({
+                    "msgid": message.id,
+                    "msgid_plural": None,
+                    "msgstr": message.string or "",
+                    "is_plural": False,
+                    "fuzzy": "fuzzy" in message.flags,
+                    "locations": [f"{loc[0]}:{loc[1]}" for loc in (message.locations or [])],
+                    "context": message.context or "",
+                    "comments": "\n".join(message.user_comments) if message.user_comments else "",
+                    "auto_comments": "\n".join(message.auto_comments) if message.auto_comments else "",
+                    "flags": list(message.flags) if message.flags else []
+                })
+
+    return {
+        "entries": entries,
+        "plural_forms": plural_forms,
+        "num_plurals": num_plurals
+    }
 
 
 @frappe.whitelist()
@@ -201,7 +238,7 @@ def save_translations_batch(app, language, translations):
     Args:
             app: App name
             language: Language code
-            translations: List of translation dicts with msgid, msgstr, fuzzy
+            translations: List of translation dicts with msgid, msgstr, fuzzy, is_plural, msgid_plural
     """
     if isinstance(translations, str):
         translations = json.loads(translations)
@@ -221,18 +258,29 @@ def save_translations_batch(app, language, translations):
     for t in translations:
         msgid = t.get("msgid")
         msgstr = t.get("msgstr", "")
+        is_plural = t.get("is_plural", False)
+        msgid_plural = t.get("msgid_plural")
         fuzzy = t.get("fuzzy", False)
 
-        if msgid in catalog:
-            message = catalog.get(msgid)
-            message.string = msgstr
-            # if fuzzy and "fuzzy" not in message.flags:
-            # 	message.flags.append("fuzzy")
-            # elif not fuzzy and "fuzzy" in message.flags:
-            # 	message.flags.remove("fuzzy")
+        if is_plural and msgid_plural:
+            # Handle plural forms - msgid is tuple (singular, plural)
+            plural_id = (msgid, msgid_plural)
+            if plural_id in catalog:
+                message = catalog.get(plural_id)
+                # msgstr should be a list for plurals
+                if isinstance(msgstr, list):
+                    message.string = tuple(msgstr)
+                else:
+                    message.string = (msgstr,)
         else:
-            # catalog.add(msgid, string=msgstr, fuzzy=fuzzy)
-            pass
+            # Regular singular message
+            if msgid in catalog:
+                message = catalog.get(msgid)
+                message.string = msgstr
+                # if fuzzy and "fuzzy" not in message.flags:
+                # 	message.flags.append("fuzzy")
+                # elif not fuzzy and "fuzzy" in message.flags:
+                # 	message.flags.remove("fuzzy")
 
     # Update catalog metadata from settings
     update_catalog_metadata(catalog)
@@ -243,10 +291,14 @@ def save_translations_batch(app, language, translations):
     frappe.cache.delete_value(
         ["bootinfo", "lang_user_translations", "merged_translations"])
 
+    # Compile MO file automatically after saving
+    mo_result = compile_mo(app, language)
+
     return {
         "success": True,
         "saved": len(translations),
-        "backup": str(backup_path) if backup_path else None
+        "backup": str(backup_path) if backup_path else None,
+        "mo_compiled": mo_result.get("success", False) if mo_result else False
     }
 
 
@@ -297,16 +349,79 @@ def import_po(app, language, content):
 
 @frappe.whitelist()
 def compile_mo(app, language):
-    """Compile PO file to MO file using babel"""
-    po_path = get_po_path(app, language)
+    """Compile PO file to MO file using babel
+
+    Handles plural forms by converting them to singular for Frappe compatibility.
+    Also copies the MO file to the assets directory where Frappe expects it.
+    """
+    from babel.messages import mofile, pofile
+    from pathlib import Path
+    import shutil
+
+    app_path = Path(frappe.get_app_path(app))
+    po_path = app_path / "locale" / f"{language}.po"
+    mo_path = app_path / "locale" / f"{language}.mo"
 
     if not po_path.exists():
         frappe.throw(_("PO file not found"))
 
-    catalog = get_catalog(app, language)
-    mo_path = write_binary(app, catalog, language)
+    # Read PO file
+    with open(po_path, "rb") as f:
+        catalog = pofile.read_po(f, locale=language)
 
-    return {"success": True, "path": str(mo_path)}
+    # Check if catalog has plural forms that Frappe can't handle
+    has_plurals = any(m.pluralizable for m in catalog if m.id)
+
+    if has_plurals:
+        # Convert plural forms to singular for Frappe compatibility
+        # We modify the catalog in place by replacing plural messages
+        messages_to_update = []
+        for message in catalog:
+            if message.id and message.pluralizable:
+                # Get the plural msgid and last translation form
+                msgid_plural = message.id[1] if isinstance(message.id, tuple) else message.id
+                msgstr = ""
+                if isinstance(message.string, tuple) and len(message.string) > 0:
+                    msgstr = message.string[-1] if message.string[-1] else ""
+                messages_to_update.append({
+                    'old_id': message.id,
+                    'new_id': msgid_plural,
+                    'string': msgstr,
+                    'locations': message.locations,
+                    'auto_comments': message.auto_comments,
+                    'user_comments': message.user_comments,
+                })
+
+        # Remove old plural messages and add new singular ones
+        for msg_data in messages_to_update:
+            if msg_data['old_id'] in catalog:
+                del catalog[msg_data['old_id']]
+            # Only add if not already exists
+            if msg_data['new_id'] not in catalog:
+                catalog.add(
+                    id=msg_data['new_id'],
+                    string=msg_data['string'],
+                    locations=msg_data['locations'],
+                    auto_comments=msg_data['auto_comments'],
+                    user_comments=msg_data['user_comments'],
+                )
+
+    # Write MO file to app locale directory
+    with open(mo_path, "wb") as f:
+        mofile.write_mo(f, catalog)
+
+    # Also copy to assets directory where Frappe looks for translations
+    bench_path = Path(frappe.get_app_path("frappe")).parent.parent
+    assets_mo_dir = bench_path / "sites" / "assets" / "locale" / language.replace("-", "_") / "LC_MESSAGES"
+    assets_mo_path = assets_mo_dir / f"{app}.mo"
+
+    # Create directory if it doesn't exist
+    assets_mo_dir.mkdir(parents=True, exist_ok=True)
+
+    # Copy MO file to assets
+    shutil.copy2(mo_path, assets_mo_path)
+
+    return {"success": True, "path": str(mo_path), "assets_path": str(assets_mo_path)}
 
 
 @frappe.whitelist()
@@ -500,3 +615,86 @@ def save_reference_languages_settings(languages):
     settings.save()
 
     return {"success": True}
+
+
+@frappe.whitelist()
+def convert_to_plural(app, language, msgid, msgid_singular, msgid_plural, msgstr_forms):
+    """Convert a singular entry to plural form in PO file
+
+    Args:
+        app: App name
+        language: Language code
+        msgid: Original msgid (the one being replaced)
+        msgid_singular: New singular form (e.g., "1 row")
+        msgid_plural: New plural form (e.g., "{0} rows")
+        msgstr_forms: List of translated plural forms
+    """
+    from babel.messages import pofile
+    from pathlib import Path
+
+    if isinstance(msgstr_forms, str):
+        msgstr_forms = json.loads(msgstr_forms)
+
+    app_path = Path(frappe.get_app_path(app))
+    po_path = app_path / "locale" / f"{language}.po"
+
+    if not po_path.exists():
+        frappe.throw(f"PO file not found for {app} in {language}")
+
+    # Create backup before modifying
+    backup_po_file(app, language)
+
+    # Read catalog
+    with open(po_path, "rb") as f:
+        catalog = pofile.read_po(f, locale=language)
+
+    # Find and remove the old singular entry
+    old_message = None
+    for message in catalog:
+        if message.id == msgid:
+            old_message = message
+            break
+
+    if not old_message:
+        frappe.throw(f"Message not found: {msgid}")
+
+    # Get locations and comments from old message
+    locations = old_message.locations
+    auto_comments = old_message.auto_comments
+    user_comments = old_message.user_comments
+    flags = set(old_message.flags) - {"fuzzy"}  # Remove fuzzy flag
+
+    # Delete the old message
+    if msgid in catalog:
+        del catalog[msgid]
+
+    # Add new plural message
+    catalog.add(
+        id=(msgid_singular, msgid_plural),
+        string=tuple(msgstr_forms),
+        locations=locations,
+        auto_comments=auto_comments,
+        user_comments=user_comments,
+        flags=flags
+    )
+
+    # Update catalog metadata
+    update_catalog_metadata(catalog)
+
+    # Write catalog back
+    with open(po_path, "wb") as f:
+        pofile.write_po(f, catalog, sort_output=False, sort_by_file=False)
+
+    # Clear translation cache
+    frappe.cache.delete_value(
+        ["bootinfo", "lang_user_translations", "merged_translations"])
+
+    # Compile MO file automatically
+    mo_result = compile_mo(app, language)
+
+    return {
+        "success": True,
+        "msgid_singular": msgid_singular,
+        "msgid_plural": msgid_plural,
+        "mo_compiled": mo_result.get("success", False) if mo_result else False
+    }

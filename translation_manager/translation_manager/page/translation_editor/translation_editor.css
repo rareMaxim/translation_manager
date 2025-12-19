@@ -239,3 +239,81 @@
 	width: 14px;
 	height: 14px;
 }
+
+/* Plural forms styles */
+.plural-forms-info {
+	font-size: 12px;
+}
+
+.plural-badge .badge {
+	font-size: 10px;
+	padding: 3px 8px;
+}
+
+.plural-source-display {
+	margin-bottom: 10px;
+}
+
+.plural-forms {
+	background: var(--gray-50);
+	border-radius: 6px;
+	padding: 12px;
+	margin-top: 8px;
+}
+
+.plural-form-group {
+	position: relative;
+}
+
+.plural-form-group label {
+	display: block;
+	margin-bottom: 4px;
+	font-weight: 500;
+}
+
+.plural-form-group textarea.plural-input {
+	font-family: var(--font-stack);
+	resize: vertical;
+	min-height: 36px;
+}
+
+.plural-form-group:not(:last-child) {
+	padding-bottom: 10px;
+	border-bottom: 1px dashed var(--gray-300);
+}
+
+/* Badge styles */
+.badge-info {
+	background-color: var(--blue-500);
+	color: white;
+}
+
+/* Translation entry with plural - add visual distinction */
+.translation-entry[data-is-plural="1"] {
+	border-left-width: 6px;
+}
+
+.translation-entry[data-is-plural="1"] .entry-label .badge {
+	margin-left: 8px;
+	vertical-align: middle;
+}
+
+/* Convert to Plural button */
+.convert-to-plural-btn {
+	font-size: 11px;
+	padding: 4px 10px;
+	background-color: var(--blue-100);
+	border-color: var(--blue-300);
+	color: var(--blue-700);
+	transition: all 0.2s;
+}
+
+.convert-to-plural-btn:hover {
+	background-color: var(--blue-500);
+	border-color: var(--blue-500);
+	color: white;
+}
+
+.convert-to-plural-btn i {
+	margin-right: 4px;
+}
