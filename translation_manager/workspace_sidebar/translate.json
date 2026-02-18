@@ -1,0 +1,28 @@
+{
+ "app": "translation_manager",
+ "creation": "2025-11-22 01:27:18.882669",
+ "docstatus": 0,
+ "doctype": "Workspace Sidebar",
+ "header_icon": "text",
+ "idx": 0,
+ "items": [
+  {
+   "child": 0,
+   "collapsible": 1,
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "Translate Messages",
+   "link_to": "translation-editor",
+   "link_type": "Page",
+   "show_arrow": 0,
+   "type": "Link"
+  }
+ ],
+ "modified": "2026-02-12 10:53:56.981054",
+ "modified_by": "Administrator",
+ "module": "Frappe Translate",
+ "name": "Translate",
+ "owner": "Administrator",
+ "standard": 1,
+ "title": "Translate"
+}
